@@ -1,25 +1,19 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:math';
+import 'dart:typed_data';
+import 'dart:ui';
 
-import 'package:awesome_notifications/awesome_notifications.dart';
 import 'package:cross_file/cross_file.dart';
-import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:tus_client_background_demo/model/NotificationManager.dart';
 import 'package:tus_client_dart/tus_client_dart.dart';
 import 'package:workmanager/workmanager.dart';
 
 class FileUploadManager {
   bool _isInitialized = false;
-  String? _tusdServerUrl;
-  String? _notificationChannelKey;
-  String? _notificationChannelGroupKey;
-  String? _notificationChannelName;
-  Directory? _tusStoreDirectory;
 
-  final Map<String, int> _notificationIdMap = {};
-
-  // This is a singleton class.
+  late final String _tusdServerUrl;
+  late final Directory _tusStoreDirectory;
+  late final UploadContext _context;
 
   FileUploadManager._privateConstructor();
 
@@ -29,51 +23,47 @@ class FileUploadManager {
     return _instance;
   }
 
-  Future<bool> initialize({
-    required String tusdServerUrl,
-    required String notificationChannelKey,
-    required String notificationChannelGroupKey,
-    Directory? tusStoreDirectory,
-    String? notificationChannelName
-  }) async {
-    if(_isInitialized) {
+  // NOTE: THIS CLASS MUST BE INITIALIZED AFTER NOTIFICATION MANAGER
+  Future<bool> initialize(UploadContext context) async {
+    if (_isInitialized) {
       return false;
     }
 
+    _context = context;
+    _tusdServerUrl = context.tusdServerUrl;
+    _tusStoreDirectory = context.tusStoreDirectory;
     print("INITIALIZING FILE UPLOAD MANAGER");
+    print("_tusdServerUrl: $_tusdServerUrl");
+    print("_tusStoreDirectory: $_tusStoreDirectory");
 
-    _tusdServerUrl = tusdServerUrl;
-    _notificationChannelKey = notificationChannelKey;
-    _notificationChannelGroupKey = notificationChannelGroupKey;
-    _tusStoreDirectory = tusStoreDirectory ?? await getApplicationDocumentsDirectory();
-    _notificationChannelName = notificationChannelName ?? notificationChannelKey;
+    bool notificationsInitialized = await NotificationManager().initialize(context);
+    await _initializeWorkmanager();
 
-    bool notificationsInitialized = await _initializeAwesomeNotifications();
     _isInitialized = notificationsInitialized;
-    await _initializeWorkManager();
     return notificationsInitialized;
   }
 
   Future<void> uploadFile(String filePath) async {
-    print("SETTING WORK MANAGER");
-    print("FILE PATH: $filePath");
-    print("TUS STORE DIRECTORY: ${_tusStoreDirectory!.path}");
-    print("TUSD URL: $_tusdServerUrl");
-    print("NOTIFICATION CHANNEL KEY: $_notificationChannelKey");
-    print("TASK UNIQUE NAME: ${getTaskUniqueName(filePath)}");
+    Map<String, dynamic> contextStr = _context.getAsMap();
+    contextStr['file_path'] = filePath;
+    // inputData['chunk_size'] = (512 * 1024 * 2);
+
     Workmanager().registerOneOffTask(getTaskUniqueName(filePath),'_',
         constraints: Constraints(networkType: NetworkType.connected),
-        inputData: <String, dynamic> {
-          'file_path': filePath,
-          'tus_store_directory': _tusStoreDirectory!.path,
-          'tusd_url': _tusdServerUrl,
-          'notification_channel_key': _notificationChannelKey,
-          'notification_group_key': _notificationChannelGroupKey
-        },
+        inputData: contextStr,
         existingWorkPolicy: ExistingWorkPolicy.keep);
   }
 
-  Future<void> _initializeWorkManager() async {
+  // Future<void> cancelUpload(String filePath) async {
+  //   Workmanager().cancelByUniqueName(getTaskUniqueName(filePath));
+  // }
+
+  Future<void> pauseUpload(String filePath) async {
+    Workmanager().cancelByUniqueName(getTaskUniqueName(filePath));
+    NotificationManager().removeNotificationIdFor(filePath);
+  }
+
+  Future<void> _initializeWorkmanager() async {
     print("INITIALIZING WORK MANAGER");
     Workmanager().initialize(
       callbackDispatcher,
@@ -81,176 +71,69 @@ class FileUploadManager {
     );
   }
 
-  Future<bool> _initializeAwesomeNotifications() {
-    print("INITIALIZING AWESOME NOTIFICATIONS");
-    return AwesomeNotifications().initialize(
-      null, // default icon
-      [
-        NotificationChannel(
-          channelGroupKey: _notificationChannelGroupKey,
-          channelKey: _notificationChannelKey,
-          channelName: _notificationChannelName ?? _notificationChannelKey,
-          channelDescription:
-          'Notification channel that show uploading files.',
-          defaultColor: const Color(0xFF9D50DD),
-          ledColor: Colors.white,
-        ),
-      ],
-      channelGroups: [
-        NotificationChannelGroup(
-          channelGroupKey: _notificationChannelGroupKey!,
-          channelGroupName: 'File Upload Group',
-        ),
-      ],
-    );
-  }
-
-  // credits to awesome-notification documentation
-  // link: https://awesome-notification-docs.vercel.app/
-  void _updateCurrentProgressBar({
-    required int id,
-    required double progressPercentage,
-    required String notificationChannelKey,
-    String? notificationGroupKey,
-    String? fileName
-  }) {
-    const double maxPercentage = 100;
-    print("UPDATE PROGRESS BAR");
-    print("PROGRESS PERCENTAGE: $progressPercentage");
-    if (progressPercentage < maxPercentage) {
-      double progress = min(progressPercentage, maxPercentage);
-      int progressInt = progress.toInt();
-      AwesomeNotifications().createNotification(
-        content: NotificationContent(
-          id: id,
-          channelKey: notificationChannelKey,
-          title: 'Uploading ${fileName ?? "file"} $progressInt%',
-          // body: 'filename.txt',
-          category: NotificationCategory.Progress,
-          // payload: {
-          //   'file': 'filename.txt',
-          //   'path': '-rmdir c://ruwindows/system32/huehuehue'
-          // },
-          notificationLayout: NotificationLayout.ProgressBar,
-          progress: progress,
-          locked: true,
-        ),
-      );
-    } else {
-      print("CREATING ALERT NOTIFICATION");
-      AwesomeNotifications().createNotification(
-        content: NotificationContent(
-          id: id,
-          channelKey: notificationChannelKey,
-          groupKey: notificationGroupKey,
-          title: 'Upload ${fileName ?? "file"} finished',
-          // body: 'filename.txt',
-          category: NotificationCategory.Progress,
-          // payload: {
-          //   'file': 'filename.txt',
-          //   'path': '-rmdir c://ruwindows/system32/huehuehue'
-          // },
-          locked: false,
-        ),
-      );
-    }
-  }
-
   String getTaskUniqueName(String str) {
     return str.replaceAll(RegExp(r"\W+"), '.');
   }
 
-  int getNotificationIdFor(String key) {
-    if (_notificationIdMap.containsKey(key)) {
-      return _notificationIdMap[key]!;
+  UploadContext getContext() {
+    return _context;
+  }
+}
+
+dynamic Function(double, Duration) throttle(dynamic Function(double, Duration) callback, Duration duration) {
+  DateTime lastExecution = DateTime.fromMillisecondsSinceEpoch(0);
+  return (double progress, Duration estimate) {
+    var now = DateTime.now();
+    if (now.difference(lastExecution) >= duration) {
+      lastExecution = now;
+      callback(progress, estimate);
     }
-
-    int hashCode = key.hashCode;
-    while(_notificationIdMap.containsValue(hashCode)) { hashCode++; }
-    _notificationIdMap[key] = hashCode;
-
-    return hashCode;
-  }
-
-  int? removeNotificationIdFor(String key) {
-    return _notificationIdMap.remove(key);
-  }
-
-  // Throttles updates to ensure the progress notification is not updated more frequently than the input duration.
-  dynamic Function(double, Duration) throttle(dynamic Function(double, Duration) callback, Duration duration) {
-    DateTime lastExecution = DateTime.fromMillisecondsSinceEpoch(0);
-    return (double progress, Duration estimate) {
-      var now = DateTime.now();
-      if (now.difference(lastExecution) >= duration) {
-        lastExecution = now;
-        callback(progress, estimate);
-      }
-    };
-  }
+  };
 }
 
 @pragma('vm:entry-point') // Mandatory if the App is obfuscated or using Flutter 3.1+
 void callbackDispatcher() {
   Workmanager().executeTask((task, inputData) async {
-    final FileUploadManager fum = FileUploadManager();
-    print("INSIDE TASK");
-    final filePath = inputData!['file_path']!;
-    final tusStoreDirectoryPath = inputData['tus_store_directory']!;
-    final tusdUrl = inputData['tusd_url']!;
-    final notificationChannelKey = inputData['notification_channel_key']!;
-    final notificationGroupKey = inputData['notification_group_key'];
+    final UploadContext context = UploadContext.getAsContext(inputData!);
+    final NotificationManager nm = NotificationManager();
+
+    final filePath = inputData['file_path']!;
+    final chunkSize = inputData['chunk_size'] ?? (512 * 1024 * 2); // 1024 kB by default
 
     print("CONSTRUCTING XFILE");
     final file = XFile(filePath);
 
     print("CONSTRUCTING TUSD STORAGE DIRECTORY");
     final tempDirectory = Directory(
-        '$tusStoreDirectoryPath/${file.name}_uploads');
+        '${context.tusStoreDirectory.path}/${file.name}_uploads');
     if (!tempDirectory.existsSync()) {
+      print("CREATING NEW DIRECTORY FOR ${tempDirectory.path}");
       tempDirectory.createSync(recursive: true);
     }
-
-    final fileName = file.path.split('/').last;
 
     print("CONSTRUCTING TusClient");
     final client = TusClient(
       file,
       store: TusFileStore(tempDirectory),
-      maxChunkSize: 512 * 1024 * 2, // 1024 kB
+      maxChunkSize: chunkSize,
     );
-
-    int notificationId = fum.getNotificationIdFor(filePath);
 
     print("Starting upload");
     await client.upload(
+      onStart: (client,estimate) => nm.updateProgressBarFor(filePath, 0, context),
 
-      onStart: (client,estimate) => {
-        fum._updateCurrentProgressBar(
-            id: notificationId,
-            progressPercentage: 0,
-            notificationChannelKey: notificationChannelKey,
-            notificationGroupKey: notificationGroupKey,
-            fileName: fileName
-        )},
-
-      onProgress: fum.throttle((progress, _) {
-        fum._updateCurrentProgressBar(
-            id: notificationId,
-            progressPercentage: progress,
-            notificationChannelKey: notificationChannelKey,
-            notificationGroupKey: notificationGroupKey,
-            fileName: fileName
-        );
+      onProgress: throttle((progress, _) {
+        nm.updateProgressBarFor(filePath, progress, context);
       }, const Duration(seconds: 1)), // Ensure that the progressBar won't be called more than once per second.
 
       onComplete: () async {
         print("Completed!");
-        fum.removeNotificationIdFor(filePath);
+        nm.removeNotificationIdFor(filePath);
         tempDirectory.deleteSync(recursive: true);
         // setState(() => _fileUrl = _client.uploadUrl);
       },
 
-      uri: Uri.parse(tusdUrl),
+      uri: Uri.parse(context.tusdServerUrl),
       metadata: {
         'testMetaData': 'testMetaData',
         'testMetaData2': 'testMetaData2',
@@ -264,3 +147,70 @@ void callbackDispatcher() {
     return Future.value(true);
   });
 }
+
+class ImmutableFileUploadManagerContext {
+  final String tusdServerUrl;
+  final Directory tusStoreDirectory;
+  final String notificationChannelKey;
+  late final String notificationChannelKeySilent;
+  late final String notificationChannelKeyAudible;
+  final String notificationChannelGroupKey;
+  final String? notificationChannelName;
+  final String? notificationChannelGroupName;
+  final String? notificationChannelDescription;
+  final String? notificationSoundSource;
+  final Color? notificationDefaultColor;
+  final Int64List? notificationVibrationPattern;
+
+  ImmutableFileUploadManagerContext({
+    required this.tusdServerUrl,
+    required this.tusStoreDirectory,
+    required this.notificationChannelKey,
+    required this.notificationChannelGroupKey,
+    String? this.notificationChannelName,
+    String? this.notificationChannelGroupName,
+    String? this.notificationChannelDescription,
+    String? this.notificationSoundSource,
+    Color? this.notificationDefaultColor,
+    Int64List? this.notificationVibrationPattern,
+  }) {
+    notificationChannelKeySilent = notificationChannelKey + '-silent';
+    notificationChannelKeyAudible = notificationChannelKey + '-audible';
+  }
+
+  Map<String, dynamic> getAsMap() {
+    Map<String,dynamic> map = {
+      'tusd_server_url': tusdServerUrl,
+      'tus_store_directory': tusStoreDirectory.path,
+      'notification_channel_key': notificationChannelKey,
+      'notification_channel_group_key': notificationChannelGroupKey,
+      'notification_channel_name': notificationChannelName,
+      'notification_channel_group_name': notificationChannelGroupName,
+      'notification_channel_description': notificationChannelDescription,
+      'notification_sound_source': notificationSoundSource,
+      'notification_default_color': notificationDefaultColor?.value,
+      'notification_vibration_pattern': notificationVibrationPattern?.toList(),
+    };
+
+    // Remove keys with null values
+    map.removeWhere((key, value) => value == null);
+    return map;
+  }
+
+  static ImmutableFileUploadManagerContext getAsContext(Map<String, dynamic> input) {
+    return new ImmutableFileUploadManagerContext(
+      tusdServerUrl: input['tusd_server_url']!,
+      tusStoreDirectory: Directory(input['tus_store_directory']!),
+      notificationChannelKey: input['notification_channel_key']!,
+      notificationChannelGroupKey: input['notification_channel_group_key']!,
+      notificationChannelName: input['notification_channel_name'],
+      notificationChannelGroupName: input['notification_channel_group_name'],
+      notificationChannelDescription: input['notification_channel_description'],
+      notificationSoundSource: input['notification_sound_source'],
+      notificationDefaultColor: input['notification_default_color'] != null ? Color(input['notification_default_color']) : null,
+      notificationVibrationPattern: input['notification_vibration_pattern'] != null ? Int64List.fromList(List<int>.from(input['notification_vibration_pattern'])) : null,
+    );
+  }
+}
+
+typedef UploadContext = ImmutableFileUploadManagerContext;

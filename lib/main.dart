@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
-import 'package:cross_file/cross_file.dart' show XFile;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 import 'model/FileUploadManager.dart';
 
@@ -13,13 +15,32 @@ import 'model/FileUploadManager.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   print("MAIN FUNCTION");
-  await FileUploadManager().initialize(
-      tusdServerUrl: 'http://167.71.212.122:30000/files/',
-      notificationChannelKey: 'scn-mobile-app-progress-notification',
-      notificationChannelGroupKey: 'scn-mobile-app',
-      notificationChannelName: 'Screetner File Upload Progress'
-  );
+
+  await dotenv.load(fileName: ".env");
+
+  UploadContext fumc = await getEnvContext();
+
+  await FileUploadManager().initialize(fumc);
   runApp(MyApp());
+}
+
+Future<UploadContext> getEnvContext() async {
+  return new UploadContext(
+      tusdServerUrl: dotenv.env['TUSD_SERVER_URL']!,
+      tusStoreDirectory: Directory(dotenv.env['TUS_STORE_DIRECTORY'] ?? (await getApplicationDocumentsDirectory()).path),
+  notificationChannelKey: dotenv.env['NOTIFICATION_CHANNEL_KEY'] ?? 'scn-mobile-app-progress-notification',
+  notificationChannelGroupKey: dotenv.env['NOTIFICATION_CHANNEL_GROUP_KEY'] ?? 'scn-mobile-app',
+  notificationChannelName: dotenv.env['NOTIFICATION_CHANNEL_NAME'],
+  notificationChannelGroupName: dotenv.env['NOTIFICATION_CHANNEL_GROUP_NAME'],
+  notificationChannelDescription: dotenv.env['NOTIFICATION_CHANNEL_DESCRIPTION'],
+  notificationSoundSource: dotenv.env['NOTIFICATION_SOUND_SOURCE'],
+  notificationDefaultColor: dotenv.env['NOTIFICATION_DEFAULT_COLOR'] != null
+  ? Color(int.parse(dotenv.env['NOTIFICATION_DEFAULT_COLOR']!, radix: 16))
+      : null,
+  notificationVibrationPattern: dotenv.env['NOTIFICATION_VIBRATION_PATTERN'] != null
+  ? Int64List.fromList(dotenv.env['NOTIFICATION_VIBRATION_PATTERN']!.split(',').map(int.parse).toList())
+      : null,
+  );
 }
 
 class MyApp extends StatelessWidget {
@@ -45,10 +66,7 @@ class _UploadPageState extends State<UploadPage> {
   double _progress = 0;
   Duration _estimate = Duration();
   FilePickerResult? _filePickerResult;
-  XFile? _file;
   Uri? _fileUrl;
-  // String tusdUrl = "http://192.168.110.27:8080/files/";
-  String tusdUrl = "http://167.71.212.122:30000/files/";
 
   void showInSnackBar(String message) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
@@ -79,8 +97,6 @@ class _UploadPageState extends State<UploadPage> {
                 child: InkWell(
                   onTap: () async {
                     _filePickerResult=await FilePicker.platform.pickFiles();
-                    _file = await _getXFile(_filePickerResult);
-                    showInSnackBar("XFILE TO ${_file?.path}");
                     setState(() {
                       _progress = 0;
                       _fileUrl = null;
@@ -107,7 +123,7 @@ class _UploadPageState extends State<UploadPage> {
                 children: <Widget>[
                   Expanded(
                     child: ElevatedButton(
-                      onPressed: _file == null
+                      onPressed: _filePickerResult == null
                           ? null
                           : _startUpload,
                       child: Text("Upload"),
@@ -185,7 +201,6 @@ class _UploadPageState extends State<UploadPage> {
 
   Future<void> _cancelUpload() async {
     final fingerPrint = _filePickerResult!.files.first.path!.replaceAll(RegExp(r"\W+"), '.');
-    // final result = await _client!.cancelUpload();
     // await Workmanager().cancelByUniqueName(fingerPrint);
 
     // if (result) {
@@ -197,7 +212,7 @@ class _UploadPageState extends State<UploadPage> {
   }
 
   Future<void> _pauseUpload() async {
-    // _client!.pauseUpload();
+    FileUploadManager().pauseUpload(_filePickerResult!.files.first.path!);
   }
 
   String _printDuration(Duration duration) {
@@ -205,25 +220,6 @@ class _UploadPageState extends State<UploadPage> {
     final twoDigitMinutes = twoDigits(duration.inMinutes.remainder(60));
     final twoDigitSeconds = twoDigits(duration.inSeconds.remainder(60));
     return '$twoDigitMinutes:$twoDigitSeconds';
-  }
-
-  /// Copy file to temporary directory before uploading
-  Future<XFile> _getXFile(FilePickerResult? result) async {
-    if (result != null) {
-      final chosenFile = result.files.first;
-      showInSnackBar("CHOSEN FILE: ${chosenFile.path}");
-      if (chosenFile.path != null) {
-        // Android, iOS, Desktop
-        return XFile(chosenFile.path!);
-      } else {
-        // Web
-        return XFile.fromData(
-          chosenFile.bytes!,
-          name: chosenFile.name,
-        );
-      }
-    }
-    return XFile('');
   }
 }
 
