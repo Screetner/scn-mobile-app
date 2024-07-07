@@ -24,7 +24,7 @@ class NotificationManager {
     final String notificationChannelName = context.notificationChannelName ?? context.notificationChannelKey;
     final String notificationChannelGroupName = context.notificationChannelGroupName ?? context.notificationChannelGroupKey;
     final String notificationChannelDescription = context.notificationChannelDescription ??
-        "Notification channel for reporting file upload progress";
+        "NotificationPage.dart channel for reporting file upload progress";
 
     bool notificationsInitialized = await AwesomeNotifications().initialize(
       null, // default icon
