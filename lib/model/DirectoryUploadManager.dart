@@ -8,18 +8,18 @@ import 'package:workmanager/workmanager.dart';
 
 import '../context/ImmutableFileUploadManagerContext.dart';
 
-class FileUploadManager {
+class DirectoryUploadManager {
   bool _isInitialized = false;
 
   late final String _tusdServerUrl;
   late final Directory _tusStoreDirectory;
   late final UploadContext _context;
 
-  FileUploadManager._privateConstructor();
+  DirectoryUploadManager._privateConstructor();
 
-  static final FileUploadManager _instance = FileUploadManager._privateConstructor();
+  static final DirectoryUploadManager _instance = DirectoryUploadManager._privateConstructor();
 
-  factory FileUploadManager() {
+  factory DirectoryUploadManager() {
     return _instance;
   }
 
@@ -44,12 +44,12 @@ class FileUploadManager {
     return notificationsInitialized;
   }
 
-  Future<void> uploadFile(String filePath) async {
+  Future<void> uploadDirectory(String uploadDirectory) async {
     Map<String, dynamic> contextStr = _context.getAsMap();
-    contextStr['file_path'] = filePath;
+    contextStr['upload_directory'] = uploadDirectory;
     // inputData['chunk_size'] = (512 * 1024 * 2);
 
-    Workmanager().registerOneOffTask(getTaskUniqueName(filePath),'_',
+    Workmanager().registerOneOffTask(getTaskUniqueName(uploadDirectory),'_',
         constraints: Constraints(networkType: NetworkType.connected),
         inputData: contextStr,
         existingWorkPolicy: ExistingWorkPolicy.keep);
@@ -60,6 +60,7 @@ class FileUploadManager {
   // }
 
   Future<void> pauseUpload(String filePath) async {
+    // TODO: pause each tus client
     Workmanager().cancelByUniqueName(getTaskUniqueName(filePath));
     NotificationManager().removeNotificationIdFor(filePath);
   }

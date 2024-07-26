@@ -1,7 +1,8 @@
 import 'dart:math';
 
 import 'package:awesome_notifications/awesome_notifications.dart';
-import 'package:tus_client_background_demo/model/FileUploadManager.dart';
+
+import '../context/ImmutableFileUploadManagerContext.dart';
 
 class NotificationManager {
   bool _isInitialized = false;
@@ -16,7 +17,7 @@ class NotificationManager {
     return _instance;
   }
 
-  Future<bool> initialize(ImmutableFileUploadManagerContext context) async {
+  Future<bool> initialize(UploadContext context) async {
     if(_isInitialized) {
       return false;
     }
@@ -66,7 +67,7 @@ class NotificationManager {
 
   // credits to awesome-notification documentation
   // link: https://awesome-notification-docs.vercel.app/
-  void updateProgressBarFor(String filePath, double progressPercentage, ImmutableFileUploadManagerContext context) {
+  void updateProgressBarFor(String filePath, double progressPercentage, UploadContext context) {
     const double maxPercentage = 100;
 
     final id = getNotificationIdFor(filePath);

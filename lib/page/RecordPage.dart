@@ -5,6 +5,8 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as path;
+import 'package:wakelock/wakelock.dart';
 
 class RecordPage extends StatefulWidget {
   const RecordPage({super.key});
@@ -18,6 +20,8 @@ class _RecordPageState extends State<RecordPage> {
   CameraController? _controller;
 
   XFile? videoFile;
+
+  String? _recordStartTime;
 
   late Directory appDirectory;
   late String videoDirectory;
@@ -113,12 +117,20 @@ class _RecordPageState extends State<RecordPage> {
       });
     } else {
       print("TOILET");
-      _stopVideoRecording().then((XFile? file) {
+      _stopVideoRecording().then((XFile? file) async {
         if (mounted) {
           setState(() {});
         }
         if (file != null) {
-          print('Video recorded to ${file.path}');
+          String newPath = await getVideoPath();
+          print("MOVING FILE FROM: ${file.path}");
+          print("MOVING FILE AT");
+          final MoveStartTime = DateTime.now().millisecondsSinceEpoch;
+          await moveFile(file.path, newPath);
+          final MoveEndTime = DateTime.now().millisecondsSinceEpoch;
+          print("FILE MOVED");
+          print("TOTAL MOVING TIME: ${MoveEndTime - MoveStartTime}");
+          print('Video recorded to ${newPath}');
           videoFile = file;
           // _startVideoPlayer();
         } else {
@@ -129,6 +141,7 @@ class _RecordPageState extends State<RecordPage> {
   }
 
   Future<void> _startVideoRecording() async {
+    Wakelock.enable();
     if (_controller!.value.isRecordingVideo) {
       print("SUCKS TO BE YOU");
       // A recording is already started, do nothing.
@@ -136,9 +149,8 @@ class _RecordPageState extends State<RecordPage> {
     }
 
     try {
-      final String currentTime = DateTime.now().millisecondsSinceEpoch.toString();
-      final String filePath = '$videoDirectory/VID_$currentTime.mp4';
       await _controller!.startVideoRecording();
+      _recordStartTime = DateTime.now().millisecondsSinceEpoch.toString();
     } on CameraException catch (e) {
       print("SUCKS TO BE YOU TOO");
       return;
@@ -146,6 +158,7 @@ class _RecordPageState extends State<RecordPage> {
   }
 
   Future<XFile?> _stopVideoRecording() async {
+    Wakelock.disable();
     final CameraController? cameraController = _controller;
 
     if (cameraController == null || !cameraController.value.isRecordingVideo) {
@@ -160,10 +173,32 @@ class _RecordPageState extends State<RecordPage> {
     }
   }
 
+  Future<void> moveFile(String fromPath, String toPath) async {
+    final file = File(fromPath);
+    await file.rename(toPath);
+  }
+
+  Future<String> getVideoPath() async {
+    final directory = await getApplicationDocumentsDirectory();
+    String filePath = path.join(directory.path, '$_recordStartTime.mp4');
+    return filePath;
+  }
+
+  Future<void> _setupDirectory() async {
+    try {
+      appDirectory = await getApplicationDocumentsDirectory();
+      videoDirectory = '${appDirectory.path}/records';
+      await Directory(videoDirectory).create(recursive: true);
+
+    } catch (e) {
+      print('Error setting up directory: $e');
+    }
+  }
+
   Future<void> _initializeCameras() async {
     try {
       _cameras = await availableCameras();
-      _controller = CameraController(_cameras![1], ResolutionPreset.max,
+      _controller = CameraController(_cameras![1], ResolutionPreset.low,
         fps: 1,
         enableAudio: false,
       );
@@ -175,17 +210,6 @@ class _RecordPageState extends State<RecordPage> {
     } on CameraException catch (e) {
       // Handle the error here
       print('Error fetching cameras: $e');
-    }
-  }
-
-  Future<void> _setupDirectory() async {
-    try {
-      appDirectory = await getApplicationDocumentsDirectory();
-      videoDirectory = '${appDirectory.path}/records';
-      await Directory(videoDirectory).create(recursive: true);
-
-    } catch (e) {
-      print('Error setting up directory: $e');
     }
   }
 }
